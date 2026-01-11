@@ -5,53 +5,69 @@ from PIL import Image, ImageEnhance, ImageOps
 def process_image(
     input_path: str,
     output_path: str,
+    scale_factor: float,               # e.g., 2.0 for 2×; 1.5 for 150%
     brightness_factor: float = 1.2,    # >1 brighter; <1 darker
     contrast_factor: float = 0.9,      # <1 lowers contrast; >1 increases
     sharpness_factor: float = 1.3,     # >1 sharper; 1.0 no change; <1 softer
-    target_max_size: tuple[int, int] = (1600, 1600)  # fit within (W, H)
+    pure_bw: bool = False,             # True -> convert to 1-bit after enhancements
+    bw_threshold: int = 128,           # threshold used if pure_bw=True (0–255)
+    dither: bool = True                # dithering for 1-bit conversion
 ) -> None:
     """
-    Process an image: brightness up, contrast down, sharpen, and scale with anti-aliasing.
-    Preserves aspect ratio and creates the output directory if needed.
-
-    Args:
-        input_path: Path to the source image.
-        output_path: Path to save the processed image (directories auto-created).
-        brightness_factor: 1.0 no change; >1 brighter; <1 darker.
-        contrast_factor:   1.0 no change; >1 more contrast; <1 less contrast.
-        sharpness_factor:  1.0 no change; >1 sharper; <1 blurrier.
-        target_max_size:   (max_width, max_height) bounding box for thumbnail.
+    Enlarge the image by a scale factor.
+    Steps:
+      1) Normalize EXIF orientation,
+      2) Convert to grayscale (black & white) BEFORE enhancements,
+      3) Apply brightness & contrast on grayscale,
+      4) Resize by `scale_factor` with high-quality resampling,
+      5) Apply sharpening (post-resize for best results),
+      6) Optional pure black/white (1-bit) conversion,
+      7) Save (auto-create directories; preserve EXIF for JPEGs).
     """
-    input_path = Path(input_path)
-    output_path = Path(output_path)
+    if scale_factor <= 0:
+        raise ValueError("scale_factor must be > 0")
 
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input image not found: {input_path}")
+    in_path = Path(input_path)
+    out_path = Path(output_path)
+
+    if not in_path.exists():
+        raise FileNotFoundError(f"Input image not found: {in_path}")
 
     # Ensure output directory exists
-    if output_path.parent and not output_path.parent.exists():
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.parent and not out_path.parent.exists():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Open and normalize orientation based on EXIF
-    with Image.open(input_path) as im:
+    with Image.open(in_path) as im:
+        # Normalize orientation based on EXIF
         im = ImageOps.exif_transpose(im)
 
-        # Turn image into black and white
-        im = ImageOps.grayscale(im)
+        # 1) Convert to black & white (grayscale) BEFORE enhancements
+        im = ImageOps.grayscale(im)  # mode 'L'
 
-        # Enhance brightness, contrast, and sharpness
+        # 2) Apply brightness & contrast
         im = ImageEnhance.Brightness(im).enhance(brightness_factor)
         im = ImageEnhance.Contrast(im).enhance(contrast_factor)
+
+        # 3) Resize by scale factor (upscale)
+        new_w = max(1, int(round(im.width * scale_factor)))
+        new_h = max(1, int(round(im.height * scale_factor)))
+        # LANCZOS provides high-quality resampling; BICUBIC is also good for upscaling
+        im = im.resize((new_w, new_h), resample=Image.LANCZOS)
+
+        # 4) Apply sharpening after resizing
         im = ImageEnhance.Sharpness(im).enhance(sharpness_factor)
 
-        # Scale preserving aspect ratio; LANCZOS gives top-quality downsampling
-        im.thumbnail(target_max_size, resample=Image.LANCZOS)
+        # 5) Optional pure black/white (1-bit) conversion
+        if pure_bw:
+            # Threshold first for predictable binarization
+            im = im.point(lambda p: 255 if p >= bw_threshold else 0, mode='L')
+            im = im.convert('1', dither=Image.FLOYDSTEINBERG if dither else Image.NONE)
 
-        # Preserve EXIF if available (for JPEG)
+        # Preserve EXIF if available (mostly relevant for JPEG)
         exif_bytes = im.info.get("exif")
 
-        # Save with sensible quality options depending on format
-        suffix = output_path.suffix.lower()
+        # 6) Save with format-appropriate options
+        suffix = out_path.suffix.lower()
         save_params = {}
 
         if suffix in {".jpg", ".jpeg"}:
@@ -66,7 +82,8 @@ def process_image(
             # PNG is lossless; optimize flag helps reduce size
             save_params.update(dict(optimize=True))
 
-        im.save(output_path, **save_params)
+        im.save(out_path, **save_params)
+
 
 if __name__ == "__main__":
 
@@ -74,12 +91,15 @@ if __name__ == "__main__":
     image_input_path = "./res/"
     image_output_path = "./res/output/"
 
+    # Example usage: enlarge 2×
     for img in Path(image_input_path).rglob("*.png"):
         process_image(
             input_path=f"{image_input_path}{img.name}",
             output_path=f"{image_output_path}{img.name}",
-            brightness_factor=1,      # a touch brighter
-            contrast_factor=3,        # slightly flatter contrast
-            sharpness_factor=5,        # mild sharpening
-            target_max_size=(1920, 1080) # fit within 1080p bounds
+            scale_factor=2.0,           # enlarge by 2 times
+            brightness_factor=1,
+            contrast_factor=3,
+            sharpness_factor=2,
+            pure_bw=True               # set True for 1-bit B/W (PNG recommended)
         )
+
