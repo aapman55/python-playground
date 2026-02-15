@@ -88,15 +88,19 @@ def process_image(
 if __name__ == "__main__":
 
     from pathlib import Path
-    image_input_path = "./res/"
-    image_output_path = "./res/output/"
+    root_folder = "E:/OneDrive/fayinschool.nl/Projecten - Documents/Nieuwe werkboeken/ABC-作業/下學期/六年级"
+    edited_postfix = "_edited"
 
     # Example usage: enlarge 2×
-    for img in Path(image_input_path).rglob("*.png"):
+    for img in Path(root_folder).rglob("*.png"):
+        if img.name.endswith(edited_postfix+img.suffix):
+            continue
+
+        print(f"Editing: {img.as_posix()}")
         process_image(
-            input_path=f"{image_input_path}{img.name}",
-            output_path=f"{image_output_path}{img.name}",
-            scale_factor=2.0,           # enlarge by 2 times
+            input_path=img.as_posix(),
+            output_path=(img.parent / (img.stem + edited_postfix +img.suffix) ).as_posix(),
+            scale_factor=4.0,           # enlarge by 2 times
             brightness_factor=1,
             contrast_factor=3,
             sharpness_factor=2,
